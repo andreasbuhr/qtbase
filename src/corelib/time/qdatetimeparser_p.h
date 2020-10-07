@@ -200,17 +200,22 @@ private:
     int sectionMaxSize(Section s, int count) const;
     QString sectionText(const QString &text, int sectionIndex, int index) const;
     StateNode scanString(const QDateTime &defaultValue, bool fixup) const;
+
+protected:
     struct ParsedSection {
         int value;
         int used;
         int zeroes;
         State state;
-        constexpr ParsedSection(State ok = Invalid,
-                                       int val = 0, int read = 0, int zs = 0)
+        constexpr ParsedSection(State ok = Invalid, int val = 0, int read = 0, int zs = 0)
             : value(ok == Invalid ? -1 : val), used(read), zeroes(zs), state(ok)
-            {}
+        {
+        }
     };
+
     ParsedSection parseSection(const QDateTime &currentValue, int sectionIndex, int offset) const;
+
+private:
     int findMonth(const QString &str1, int monthstart, int sectionIndex,
                   int year, QString *monthName = nullptr, int *used = nullptr) const;
     int findDay(const QString &str1, int intDaystart, int sectionIndex,

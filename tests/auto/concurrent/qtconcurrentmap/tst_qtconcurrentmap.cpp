@@ -98,6 +98,22 @@ public:
     }
 };
 
+class MultiplyBy2InPlaceMoveOnly
+{
+public:
+    MultiplyBy2InPlaceMoveOnly() = default;
+    MultiplyBy2InPlaceMoveOnly(MultiplyBy2InPlaceMoveOnly &&) = default;
+    MultiplyBy2InPlaceMoveOnly &operator=(MultiplyBy2InPlaceMoveOnly &&other) = default;
+
+    MultiplyBy2InPlaceMoveOnly(const MultiplyBy2InPlaceMoveOnly &) = delete;
+    MultiplyBy2InPlaceMoveOnly &operator=(const MultiplyBy2InPlaceMoveOnly &) = delete;
+
+    void operator()(int &x)
+    {
+        x *= 2;
+    }
+};
+
 Q_DECLARE_METATYPE(QList<Number>);
 
 void tst_QtConcurrentMap::map()
@@ -138,6 +154,12 @@ void tst_QtConcurrentMap::map()
         QCOMPARE(list, QList<int>() << 128 << 256 << 384);
         QtConcurrent::map(list.begin(), list.end(), [](int &x){x *= 2;}).waitForFinished();
         QCOMPARE(list, QList<int>() << 256 << 512 << 768);
+
+        // move-only functor
+        QtConcurrent::map(list, MultiplyBy2InPlaceMoveOnly()).waitForFinished();
+        QCOMPARE(list, QList<int>() << 512 << 1024 << 1536);
+        QtConcurrent::map(list.begin(), list.end(), MultiplyBy2InPlaceMoveOnly()).waitForFinished();
+        QCOMPARE(list, QList<int>() << 1024 << 2048 << 3072);
     }
 
     // functors don't take arguments by reference, making these no-ops
@@ -259,6 +281,12 @@ void tst_QtConcurrentMap::blockingMap()
         QCOMPARE(list, QList<int>() << 128 << 256 << 384);
         QtConcurrent::blockingMap(list.begin(), list.end(), [](int &x) { x *= 2; });
         QCOMPARE(list, QList<int>() << 256 << 512 << 768);
+
+        // move-only functor
+        QtConcurrent::blockingMap(list, MultiplyBy2InPlaceMoveOnly());
+        QCOMPARE(list, QList<int>() << 512 << 1024 << 1536);
+        QtConcurrent::blockingMap(list.begin(), list.end(), MultiplyBy2InPlaceMoveOnly());
+        QCOMPARE(list, QList<int>() << 1024 << 2048 << 3072);
     }
 
     // functors take arguments by reference, modifying the move-only sequence in place
@@ -409,6 +437,23 @@ public:
     }
 };
 
+class MultiplyBy2MoveOnly
+{
+public:
+    MultiplyBy2MoveOnly() = default;
+    MultiplyBy2MoveOnly(MultiplyBy2MoveOnly &&) = default;
+    MultiplyBy2MoveOnly &operator=(MultiplyBy2MoveOnly &&other) = default;
+
+    MultiplyBy2MoveOnly(const MultiplyBy2MoveOnly &) = delete;
+    MultiplyBy2MoveOnly &operator=(const MultiplyBy2MoveOnly &) = delete;
+
+    int operator()(int x) const
+    {
+        int y = x * 2;
+        return y;
+    }
+};
+
 double intToDouble(int x)
 {
     return double(x);
@@ -444,22 +489,25 @@ do {\
 } while (false)
 
 template <typename SourceObject, typename ResultObject, typename MapObject>
-void testMapped(const QList<SourceObject> &sourceObjectList, const QList<ResultObject> &expectedResult, MapObject mapObject)
+void testMapped(const QList<SourceObject> &sourceObjectList,
+                const QList<ResultObject> &expectedResult, MapObject &&mapObject)
 {
     const QList<ResultObject> result1 = QtConcurrent::mapped(
-                sourceObjectList, mapObject).results();
+                sourceObjectList, std::forward<MapObject>(mapObject)).results();
     QCOMPARE(result1, expectedResult);
 
     const QList<ResultObject> result2 = QtConcurrent::mapped(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject).results();
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject)).results();
     QCOMPARE(result2, expectedResult);
 
     const QList<ResultObject> result3 = QtConcurrent::blockingMapped(
-                sourceObjectList, mapObject);
+                sourceObjectList, std::forward<MapObject>(mapObject));
     QCOMPARE(result3, expectedResult);
 
     const QList<ResultObject> result4 = QtConcurrent::blockingMapped<QList<ResultObject>>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject));
     QCOMPARE(result4, expectedResult);
 }
 
@@ -491,6 +539,8 @@ void tst_QtConcurrentMap::mapped()
     CHECK_FAIL("member");
     testMapped(intList, intListMultipiedBy2, lambdaMultiplyBy2);
     CHECK_FAIL("lambda");
+    testMapped(intList, intListMultipiedBy2, MultiplyBy2MoveOnly());
+    CHECK_FAIL("move-only functor");
 
     // change the value_type, same container
     testMapped(intList, doubleList, IntToDouble());
@@ -561,25 +611,27 @@ template <typename SourceObject, typename ResultObject, typename MapObject>
 void testMappedThreadPool(QThreadPool *pool,
                           const QList<SourceObject> &sourceObjectList,
                           const QList<ResultObject> &expectedResult,
-                          MapObject mapObject)
+                          MapObject &&mapObject)
 {
     const QList<ResultObject> result1 = QtConcurrent::mapped(pool,
-                sourceObjectList, mapObject).results();
+                sourceObjectList, std::forward<MapObject>(mapObject)).results();
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result2 = QtConcurrent::mapped(pool,
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject).results();
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject)).results();
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result3 = QtConcurrent::blockingMapped(pool,
-                sourceObjectList, mapObject);
+                sourceObjectList, std::forward<MapObject>(mapObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result4 = QtConcurrent::blockingMapped<QList<ResultObject>>(pool,
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -603,6 +655,7 @@ public:
 void tst_QtConcurrentMap::mappedThreadPool()
 {
     const QList<int> intList {1, 2, 3};
+    const QList<int> intListMultipiedBy2 {2, 4, 6};
     const QList<int> intListMultipiedBy3 {3, 6, 9};
 
     auto lambdaMultiplyBy3 = [](int x) {
@@ -621,6 +674,8 @@ void tst_QtConcurrentMap::mappedThreadPool()
     CHECK_FAIL("function");
     testMappedThreadPool(&pool, intList, intListMultipiedBy3, lambdaMultiplyBy3);
     CHECK_FAIL("lambda");
+    testMappedThreadPool(&pool, intList, intListMultipiedBy2, MultiplyBy2MoveOnly());
+    CHECK_FAIL("move-only functor");
 
     {
         // rvalue sequences
@@ -671,42 +726,57 @@ public:
 };
 
 template <typename SourceObject, typename ResultObject, typename MapObject, typename ReduceObject>
-void testMappedReduced(const QList<SourceObject> &sourceObjectList, const ResultObject &expectedResult, MapObject mapObject, ReduceObject reduceObject)
+void testMappedReduced(const QList<SourceObject> &sourceObjectList,
+                       const ResultObject &expectedResult, MapObject &&mapObject,
+                       ReduceObject &&reduceObject)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced<ResultObject>(
-                sourceObjectList, mapObject, reduceObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::mappedReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced<ResultObject>(
-                sourceObjectList, mapObject, reduceObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result4, expectedResult);
 }
 
 template <typename SourceObject, typename ResultObject, typename MapObject, typename ReduceObject>
-void testMappedReduced(const QList<SourceObject> &sourceObjectList, const ResultObject &expectedResult, MapObject mapObject, ReduceObject reduceObject, QtConcurrent::ReduceOptions options)
+void testMappedReduced(const QList<SourceObject> &sourceObjectList,
+                       const ResultObject &expectedResult,
+                       MapObject &&mapObject, ReduceObject &&reduceObject,
+                       QtConcurrent::ReduceOptions options)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced(
-                sourceObjectList, mapObject, reduceObject, options);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject), options);
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::mappedReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                options);
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced(
-                sourceObjectList, mapObject, reduceObject, options);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject), options);
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                options);
     QCOMPARE(result4, expectedResult);
 }
 
@@ -736,6 +806,8 @@ void tst_QtConcurrentMap::mappedReduced()
     CHECK_FAIL("functor-member");
     testMappedReduced(intList, sumOfSquares, IntSquare(), lambdaSumReduce);
     CHECK_FAIL("functor-lambda");
+    testMappedReduced(intList, 2 * sum, MultiplyBy2MoveOnly(), IntSumReduceMoveOnly());
+    CHECK_FAIL("move-only functor-functor");
 
     // FUNCTION-other
     testMappedReduced(intList, sumOfSquares, intSquare, IntSumReduce());
@@ -793,26 +865,30 @@ template <typename SourceObject, typename ResultObject, typename MapObject, type
 void testMappedReducedThreadPool(QThreadPool *pool,
                                  const QList<SourceObject> &sourceObjectList,
                                  const ResultObject &expectedResult,
-                                 MapObject mapObject,
-                                 ReduceObject reduceObject)
+                                 MapObject &&mapObject,
+                                 ReduceObject &&reduceObject)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced<ResultObject>(pool,
-                sourceObjectList, mapObject, reduceObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result2 = QtConcurrent::mappedReduced<ResultObject>(pool,
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced<ResultObject>(pool,
-                sourceObjectList, mapObject, reduceObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced<ResultObject>(pool,
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -857,6 +933,8 @@ void tst_QtConcurrentMap::mappedReducedThreadPool()
     CHECK_FAIL("functor-function");
     testMappedReducedThreadPool(&pool, intList, sumOfCubes, IntCube(), lambdaSumReduce);
     CHECK_FAIL("functor-lambda");
+    testMappedReducedThreadPool(&pool, intList, 12, MultiplyBy2MoveOnly(), IntSumReduceMoveOnly());
+    CHECK_FAIL("functor-functor");
 
     // FUNCTION-other
     testMappedReducedThreadPool(&pool, intList, sumOfCubes, intCube, IntSumReduce());
@@ -947,52 +1025,67 @@ void tst_QtConcurrentMap::mappedReducedDifferentType()
     CHECK_FAIL("lambda-lambda");
 }
 
-template <typename SourceObject, typename ResultObject, typename InitialObject, typename MapObject, typename ReduceObject>
+template <typename SourceObject, typename ResultObject, typename InitialObject, typename MapObject,
+          typename ReduceObject>
 void testMappedReducedInitialValue(const QList<SourceObject> &sourceObjectList,
-                                   const ResultObject &expectedResult,
-                                   MapObject mapObject,
-                                   ReduceObject reduceObject,
-                                   InitialObject &&initialObject)
+                                   const ResultObject &expectedResult, MapObject &&mapObject,
+                                   ReduceObject &&reduceObject, InitialObject &&initialObject)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced<ResultObject>(
-                sourceObjectList, mapObject, reduceObject, initialObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::mappedReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, initialObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced<ResultObject>(
-                sourceObjectList, mapObject, reduceObject, initialObject);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, initialObject);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result4, expectedResult);
 }
 
 template <typename SourceObject, typename ResultObject, typename InitialObject, typename MapObject, typename ReduceObject>
 void testMappedReducedInitialValue(const QList<SourceObject> &sourceObjectList,
                                    const ResultObject &expectedResult,
-                                   MapObject mapObject,
-                                   ReduceObject reduceObject,
+                                   MapObject &&mapObject,
+                                   ReduceObject &&reduceObject,
                                    InitialObject &&initialObject,
                                    QtConcurrent::ReduceOptions options)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced(
-                sourceObjectList, mapObject, reduceObject, initialObject, options);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::mappedReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, initialObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced(
-                sourceObjectList, mapObject, reduceObject, initialObject, options);
+                sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), mapObject, reduceObject, initialObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result4, expectedResult);
 }
 
@@ -1027,6 +1120,8 @@ void tst_QtConcurrentMap::mappedReducedInitialValue()
     CHECK_FAIL("functor-member");
     testMappedReducedInitialValue(intList, sumOfSquares, IntSquare(), lambdaSumReduce, intInitial);
     CHECK_FAIL("functor-lambda");
+    testMappedReducedInitialValue(intList, 22, MultiplyBy2MoveOnly(), IntSumReduceMoveOnly(), intInitial);
+    CHECK_FAIL("move-only functor-functor");
 
     // FUNCTION-other
     testMappedReducedInitialValue(intList, sumOfSquares, intSquare, IntSumReduce(), intInitial);
@@ -1081,33 +1176,39 @@ void tst_QtConcurrentMap::mappedReducedInitialValue()
     }
 }
 
-template <typename SourceObject, typename ResultObject, typename InitialObject, typename MapObject, typename ReduceObject>
+template <typename SourceObject, typename ResultObject, typename InitialObject, typename MapObject,
+          typename ReduceObject>
 void testMappedReducedInitialValueThreadPool(QThreadPool *pool,
                                              const QList<SourceObject> &sourceObjectList,
                                              const ResultObject &expectedResult,
-                                             MapObject mapObject,
-                                             ReduceObject reduceObject,
+                                             MapObject &&mapObject, ReduceObject &&reduceObject,
                                              InitialObject &&initialObject)
 {
     const ResultObject result1 = QtConcurrent::mappedReduced<ResultObject>(
-                pool, sourceObjectList, mapObject, reduceObject, initialObject);
+                pool, sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result2 = QtConcurrent::mappedReduced<ResultObject>(
                 pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                mapObject, reduceObject, initialObject);
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result3 = QtConcurrent::blockingMappedReduced<ResultObject>(
-                pool, sourceObjectList, mapObject, reduceObject, initialObject);
+                pool, sourceObjectList, std::forward<MapObject>(mapObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result4 = QtConcurrent::blockingMappedReduced<ResultObject>(
                 pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                mapObject, reduceObject, initialObject);
+                std::forward<MapObject>(mapObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -1142,6 +1243,10 @@ void tst_QtConcurrentMap::mappedReducedInitialValueThreadPool()
     testMappedReducedInitialValueThreadPool(&pool, intList, sumOfCubes, IntCube(),
                                             lambdaSumReduce, intInitial);
     CHECK_FAIL("functor-lambda");
+
+    testMappedReducedInitialValueThreadPool(&pool, intList, 22, MultiplyBy2MoveOnly(),
+                                            IntSumReduceMoveOnly(), intInitial);
+    CHECK_FAIL("move-only functor-functor");
 
     // FUNCTION-other
     testMappedReducedInitialValueThreadPool(&pool, intList, sumOfCubes, intCube,

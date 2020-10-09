@@ -67,15 +67,15 @@ template <typename SourceObject,
           typename FilterObject>
 void testFilter(const QList<SourceObject> &sourceObjectList,
                 const QList<ResultObject> &expectedResult,
-                FilterObject filterObject)
+                FilterObject &&filterObject)
 {
     QList<SourceObject> copy1 = sourceObjectList;
     QList<SourceObject> copy2 = sourceObjectList;
 
-    QtConcurrent::filter(copy1, filterObject).waitForFinished();
+    QtConcurrent::filter(copy1, std::forward<FilterObject>(filterObject)).waitForFinished();
     QCOMPARE(copy1, expectedResult);
 
-    QtConcurrent::blockingFilter(copy2, filterObject);
+    QtConcurrent::blockingFilter(copy2, std::forward<FilterObject>(filterObject));
     QCOMPARE(copy2, expectedResult);
 }
 
@@ -98,6 +98,8 @@ void tst_QtConcurrentFilter::filter()
     CHECK_FAIL("member");
     testFilter(intList, intListEven, lambdaIsEven);
     CHECK_FAIL("lambda");
+    testFilter(intList, intListEven, KeepEvenIntegersMoveOnly());
+    CHECK_FAIL("move-only functor");
 }
 
 static QSemaphore semaphore(1);
@@ -124,16 +126,16 @@ template <typename SourceObject,
 void testFilterThreadPool(QThreadPool *pool,
                           const QList<SourceObject> &sourceObjectList,
                           const QList<ResultObject> &expectedResult,
-                          FilterObject filterObject)
+                          FilterObject &&filterObject)
 {
     QList<SourceObject> copy1 = sourceObjectList;
     QList<SourceObject> copy2 = sourceObjectList;
 
-    QtConcurrent::filter(pool, copy1, filterObject).waitForFinished();
+    QtConcurrent::filter(pool, copy1, std::forward<FilterObject>(filterObject)).waitForFinished();
     QCOMPARE(copy1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
-    QtConcurrent::blockingFilter(pool, copy2, filterObject);
+    QtConcurrent::blockingFilter(pool, copy2, std::forward<FilterObject>(filterObject));
     QCOMPARE(copy2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -157,7 +159,9 @@ bool keepOddIntegers(const int &x)
 void tst_QtConcurrentFilter::filterThreadPool()
 {
     const QList<int> intList {1, 2, 3, 4};
-    const QList<int> intListEven {1, 3};
+    const QList<int> intListOdd {1, 3};
+    const QList<int> intListEven {2, 4};
+
 
     auto lambdaIsOdd = [](const int &x) {
         storeCurrentThread();
@@ -169,12 +173,14 @@ void tst_QtConcurrentFilter::filterThreadPool()
     QCOMPARE(semaphore.available(), 1);
     workingThreads.clear();
 
-    testFilterThreadPool(&pool, intList, intListEven, KeepOddIntegers());
+    testFilterThreadPool(&pool, intList, intListOdd, KeepOddIntegers());
     CHECK_FAIL("functor");
-    testFilterThreadPool(&pool, intList, intListEven, keepOddIntegers);
+    testFilterThreadPool(&pool, intList, intListOdd, keepOddIntegers);
     CHECK_FAIL("function");
-    testFilterThreadPool(&pool, intList, intListEven, lambdaIsOdd);
+    testFilterThreadPool(&pool, intList, intListOdd, lambdaIsOdd);
     CHECK_FAIL("lambda");
+    testFilterThreadPool(&pool, intList, intListEven, KeepEvenIntegersMoveOnly());
+    CHECK_FAIL("move-only functor");
 }
 
 template <typename SourceObject,
@@ -182,23 +188,24 @@ template <typename SourceObject,
           typename FilterObject>
 void testFiltered(const QList<SourceObject> &sourceObjectList,
                   const QList<ResultObject> &expectedResult,
-                  FilterObject filterObject)
+                  FilterObject &&filterObject)
 {
     const QList<ResultObject> result1 = QtConcurrent::filtered(
-                sourceObjectList, filterObject).results();
+                sourceObjectList, std::forward<FilterObject>(filterObject)).results();
     QCOMPARE(result1, expectedResult);
 
     const QList<ResultObject> result2 = QtConcurrent::filtered(
                 sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject).results();
+                std::forward<FilterObject>(filterObject)).results();
     QCOMPARE(result2, expectedResult);
 
     const QList<ResultObject> result3 = QtConcurrent::blockingFiltered(
-                sourceObjectList, filterObject);
+                sourceObjectList, std::forward<FilterObject>(filterObject));
     QCOMPARE(result3, expectedResult);
 
     const QList<ResultObject> result4 = QtConcurrent::blockingFiltered<QList<ResultObject>>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), filterObject);
+            sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject));
     QCOMPARE(result4, expectedResult);
 }
 
@@ -221,6 +228,8 @@ void tst_QtConcurrentFilter::filtered()
     CHECK_FAIL("member");
     testFiltered(intList, intListEven, lambdaIsEven);
     CHECK_FAIL("lambda");
+    testFiltered(intList, intListEven, KeepEvenIntegersMoveOnly());
+    CHECK_FAIL("move-only functor");
 
     {
         // rvalue sequences
@@ -251,26 +260,27 @@ template <typename SourceObject,
 void testFilteredThreadPool(QThreadPool *pool,
                             const QList<SourceObject> &sourceObjectList,
                             const QList<ResultObject> &expectedResult,
-                            FilterObject filterObject)
+                            FilterObject &&filterObject)
 {
     const QList<ResultObject> result1 = QtConcurrent::filtered(
-                pool, sourceObjectList, filterObject).results();
+                pool, sourceObjectList, std::forward<FilterObject>(filterObject)).results();
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result2 = QtConcurrent::filtered(
                 pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject).results();
+                std::forward<FilterObject>(filterObject)).results();
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result3 = QtConcurrent::blockingFiltered(
-                pool, sourceObjectList, filterObject);
+                pool, sourceObjectList, std::forward<FilterObject>(filterObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const QList<ResultObject> result4 = QtConcurrent::blockingFiltered<QList<ResultObject>>(
-                pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(), filterObject);
+            pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -278,7 +288,8 @@ void testFilteredThreadPool(QThreadPool *pool,
 void tst_QtConcurrentFilter::filteredThreadPool()
 {
     const QList<int> intList {1, 2, 3, 4};
-    const QList<int> intListEven {1, 3};
+    const QList<int> intListOdd {1, 3};
+    const QList<int> intListEven {2, 4};
 
     auto lambdaIsOdd = [](const int &x) {
         storeCurrentThread();
@@ -290,12 +301,14 @@ void tst_QtConcurrentFilter::filteredThreadPool()
     QCOMPARE(semaphore.available(), 1);
     workingThreads.clear();
 
-    testFilteredThreadPool(&pool, intList, intListEven, KeepOddIntegers());
+    testFilteredThreadPool(&pool, intList, intListOdd, KeepOddIntegers());
     CHECK_FAIL("functor");
-    testFilteredThreadPool(&pool, intList, intListEven, keepOddIntegers);
+    testFilteredThreadPool(&pool, intList, intListOdd, keepOddIntegers);
     CHECK_FAIL("function");
-    testFilteredThreadPool(&pool, intList, intListEven, lambdaIsOdd);
+    testFilteredThreadPool(&pool, intList, intListOdd, lambdaIsOdd);
     CHECK_FAIL("lambda");
+    testFilteredThreadPool(&pool, intList, intListEven, KeepEvenIntegersMoveOnly());
+    CHECK_FAIL("move-only functor");
 
     {
         // rvalue sequences
@@ -329,25 +342,27 @@ template <typename SourceObject,
           typename ReduceObject>
 void testFilteredReduced(const QList<SourceObject> &sourceObjectList,
                          const ResultObject &expectedResult,
-                         FilterObject filterObject,
-                         ReduceObject reduceObject)
+                         FilterObject &&filterObject,
+                         ReduceObject &&reduceObject)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced<ResultObject>(
-                sourceObjectList, filterObject, reduceObject);
+            sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::filteredReduced<ResultObject>(
                 sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                sourceObjectList, filterObject, reduceObject);
+            sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced<ResultObject>(
                 sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result4, expectedResult);
 }
 
@@ -357,26 +372,30 @@ template <typename SourceObject,
           typename ReduceObject>
 void testFilteredReduced(const QList<SourceObject> &sourceObjectList,
                          const ResultObject &expectedResult,
-                         FilterObject filterObject,
-                         ReduceObject reduceObject,
+                         FilterObject &&filterObject,
+                         ReduceObject &&reduceObject,
                          QtConcurrent::ReduceOptions options)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced(
-                sourceObjectList, filterObject, reduceObject, options);
+                sourceObjectList, std::forward<FilterObject>(filterObject),
+                std::forward<ReduceObject>(reduceObject), options);
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::filteredReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), filterObject,
-                reduceObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<FilterObject>(filterObject),
+                std::forward<ReduceObject>(reduceObject), options);
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced(
-                sourceObjectList, filterObject, reduceObject, options);
+                sourceObjectList, std::forward<FilterObject>(filterObject),
+                std::forward<ReduceObject>(reduceObject), options);
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(), filterObject,
-                reduceObject, options);
+                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+                options);
     QCOMPARE(result4, expectedResult);
 }
 
@@ -458,6 +477,9 @@ void tst_QtConcurrentFilter::filteredReduced()
     testFilteredReduced(intList, intSum, lambdaIsEven, lambdaIntSumReduce);
     CHECK_FAIL("lambda-lambda");
 
+    testFilteredReduced(intList, intSum, KeepEvenIntegersMoveOnly(), IntSumReduceMoveOnly());
+    CHECK_FAIL("move-only functor-functor");
+
     {
         // rvalue sequences
         auto future = QtConcurrent::filteredReduced(std::vector { 1, 2, 3, 4 }, keepEvenIntegers,
@@ -488,28 +510,30 @@ template <typename SourceObject,
 void testFilteredReducedThreadPool(QThreadPool *pool,
                                    const QList<SourceObject> &sourceObjectList,
                                    const ResultObject &expectedResult,
-                                   FilterObject filterObject,
-                                   ReduceObject reduceObject)
+                                   FilterObject &&filterObject,
+                                   ReduceObject &&reduceObject)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced<ResultObject>(
-                pool, sourceObjectList, filterObject, reduceObject);
+            pool, sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result2 = QtConcurrent::filteredReduced<ResultObject>(
                 pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                pool, sourceObjectList, filterObject, reduceObject);
+            pool, sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced<ResultObject>(
                 pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -517,7 +541,8 @@ void testFilteredReducedThreadPool(QThreadPool *pool,
 void tst_QtConcurrentFilter::filteredReducedThreadPool()
 {
     const QList<int> intList {1, 2, 3, 4};
-    const int intSum = 4; // sum of even values
+    const int intSum = 4; // sum of odd values
+    const int intSumEven = 6;
 
     auto lambdaIsOdd = [](const int &x) {
         storeCurrentThread();
@@ -555,6 +580,10 @@ void tst_QtConcurrentFilter::filteredReducedThreadPool()
     CHECK_FAIL("lambda-function");
     testFilteredReducedThreadPool(&pool, intList, intSum, lambdaIsOdd, lambdaSumReduce);
     CHECK_FAIL("lambda-lambda");
+
+    testFilteredReducedThreadPool(&pool, intList, intSumEven, KeepEvenIntegers(),
+                                  IntSumReduceMoveOnly());
+    CHECK_FAIL("move-only functor-functor");
 
     {
         // rvalue sequences
@@ -635,26 +664,30 @@ template <typename SourceObject,
           typename ReduceObject>
 void testFilteredReducedInitialValue(const QList<SourceObject> &sourceObjectList,
                                      const ResultObject &expectedResult,
-                                     FilterObject filterObject,
-                                     ReduceObject reduceObject,
+                                     FilterObject &&filterObject,
+                                     ReduceObject &&reduceObject,
                                      InitialObject &&initialObject)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced<ResultObject>(
-                sourceObjectList, filterObject, reduceObject, initialObject);
+            sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject), std::forward<InitialObject>(initialObject));
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::filteredReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject);
+            sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+            std::forward<InitialObject>(initialObject));
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                sourceObjectList, filterObject, reduceObject, initialObject);
+            sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject), std::forward<InitialObject>(initialObject));
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject);
+            sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+            std::forward<InitialObject>(initialObject));
     QCOMPARE(result4, expectedResult);
 }
 
@@ -665,27 +698,33 @@ template <typename SourceObject,
           typename ReduceObject>
 void testFilteredReducedInitialValue(const QList<SourceObject> &sourceObjectList,
                                      const ResultObject &expectedResult,
-                                     FilterObject filterObject,
-                                     ReduceObject reduceObject,
+                                     FilterObject &&filterObject,
+                                     ReduceObject &&reduceObject,
                                      InitialObject &&initialObject,
                                      QtConcurrent::ReduceOptions options)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced(
-                sourceObjectList, filterObject, reduceObject, initialObject, options);
+                sourceObjectList, std::forward<FilterObject>(filterObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result1, expectedResult);
 
     const ResultObject result2 = QtConcurrent::filteredReduced(
                 sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject, options);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result2, expectedResult);
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced(
-                sourceObjectList, filterObject, reduceObject, initialObject, options);
+                sourceObjectList, std::forward<FilterObject>(filterObject),
+                std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result3, expectedResult);
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced(
                 sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject, options);
+                std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+                std::forward<InitialObject>(initialObject), options);
     QCOMPARE(result4, expectedResult);
 }
 
@@ -774,6 +813,10 @@ void tst_QtConcurrentFilter::filteredReducedInitialValue()
                                     lambdaIntSumReduce, intInitial);
     CHECK_FAIL("lambda-lambda");
 
+    testFilteredReducedInitialValue(intList, intSum, KeepEvenIntegersMoveOnly(),
+                                    IntSumReduceMoveOnly(), intInitial);
+    CHECK_FAIL("move-only functor-functor");
+
     {
         // rvalue sequences
         auto future = QtConcurrent::filteredReduced(std::vector { 1, 2, 3, 4 }, keepEvenIntegers,
@@ -805,29 +848,33 @@ template <typename SourceObject,
 void testFilteredReducedInitialValueThreadPool(QThreadPool *pool,
                                                const QList<SourceObject> &sourceObjectList,
                                                const ResultObject &expectedResult,
-                                               FilterObject filterObject,
-                                               ReduceObject reduceObject,
+                                               FilterObject &&filterObject,
+                                               ReduceObject &&reduceObject,
                                                InitialObject &&initialObject)
 {
     const ResultObject result1 = QtConcurrent::filteredReduced<ResultObject>(
-                pool, sourceObjectList, filterObject, reduceObject, initialObject);
+            pool, sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject), std::forward<InitialObject>(initialObject));
     QCOMPARE(result1, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result2 = QtConcurrent::filteredReduced<ResultObject>(
-                pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject);
+            pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+            std::forward<InitialObject>(initialObject));
     QCOMPARE(result2, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result3 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                pool, sourceObjectList, filterObject, reduceObject, initialObject);
+            pool, sourceObjectList, std::forward<FilterObject>(filterObject),
+            std::forward<ReduceObject>(reduceObject), std::forward<InitialObject>(initialObject));
     QCOMPARE(result3, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 
     const ResultObject result4 = QtConcurrent::blockingFilteredReduced<ResultObject>(
-                pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
-                filterObject, reduceObject, initialObject);
+            pool, sourceObjectList.constBegin(), sourceObjectList.constEnd(),
+            std::forward<FilterObject>(filterObject), std::forward<ReduceObject>(reduceObject),
+            std::forward<InitialObject>(initialObject));
     QCOMPARE(result4, expectedResult);
     QCOMPARE(threadCount(), 1); // ensure the only one thread was working
 }
@@ -836,7 +883,8 @@ void tst_QtConcurrentFilter::filteredReducedInitialValueThreadPool()
 {
     const QList<int> intList {1, 2, 3, 4};
     const int intInitial = 10;
-    const int intSum = 14; // sum of even values and initial value
+    const int intSum = 14; // sum of odd values and initial value
+    const int intSumEven = 16; // sum of even values and initial value
 
     auto lambdaIsOdd = [](const int &x) {
         storeCurrentThread();
@@ -883,6 +931,11 @@ void tst_QtConcurrentFilter::filteredReducedInitialValueThreadPool()
     testFilteredReducedInitialValueThreadPool(&pool, intList, intSum, lambdaIsOdd,
                                               lambdaSumReduce, intInitial);
     CHECK_FAIL("lambda-lambda");
+
+    testFilteredReducedInitialValueThreadPool(&pool, intList, intSumEven,
+                                              KeepEvenIntegersMoveOnly(), IntSumReduceMoveOnly(),
+                                              intInitial);
+    CHECK_FAIL("move-only functor-functor");
 
     {
         // rvalue sequences

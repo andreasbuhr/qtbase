@@ -45,11 +45,14 @@ private slots:
     void mapOnRvalue();
     void mapped();
     void mappedThreadPool();
+    void mappedWithMoveOnlyCallable();
     void mappedReduced();
     void mappedReducedThreadPool();
+    void mappedReducedWithMoveOnlyCallable();
     void mappedReducedDifferentType();
     void mappedReducedInitialValue();
     void mappedReducedInitialValueThreadPool();
+    void mappedReducedInitialValueWithMoveOnlyCallable();
     void mappedReducedDifferentTypeInitialValue();
     void assignResult();
     void functionOverloads();
@@ -697,6 +700,50 @@ void tst_QtConcurrentMap::mappedThreadPool()
     }
 }
 
+void tst_QtConcurrentMap::mappedWithMoveOnlyCallable()
+{
+    const QList<int> intList { 1, 2, 3 };
+    const QList<int> intListMultipiedBy2 { 2, 4, 6 };
+    {
+        const auto result = QtConcurrent::mapped(intList, MultiplyBy2()).results();
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result =
+                QtConcurrent::mapped(intList.begin(), intList.end(), MultiplyBy2()).results();
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result = QtConcurrent::blockingMapped(intList, MultiplyBy2());
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result = QtConcurrent::blockingMapped<QList<int>>(intList.begin(), intList.end(),
+                                                                     MultiplyBy2());
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+
+    QThreadPool pool;
+    {
+        const auto result = QtConcurrent::mapped(&pool, intList, MultiplyBy2()).results();
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result = QtConcurrent::mapped(
+                    &pool, intList.begin(), intList.end(), MultiplyBy2()).results();
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result = QtConcurrent::blockingMapped(&pool, intList, MultiplyBy2());
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+    {
+        const auto result = QtConcurrent::blockingMapped<QList<int>>(&pool, intList.begin(),
+                                                                     intList.end(), MultiplyBy2());
+        QCOMPARE(result, intListMultipiedBy2);
+    }
+}
+
 int intSquare(int x)
 {
     return x * x;
@@ -972,6 +1019,56 @@ void tst_QtConcurrentMap::mappedReducedThreadPool()
         auto result = QtConcurrent::blockingMappedReduced(&pool, MoveOnlyVector({ 1, 2, 3 }),
                                                           intCube, intSumReduce);
         QCOMPARE(result, sumOfCubes);
+    }
+}
+
+void tst_QtConcurrentMap::mappedReducedWithMoveOnlyCallable()
+{
+    const QList<int> intList { 1, 2, 3 };
+    const auto sum = 12;
+    {
+        const auto result = QtConcurrent::mappedReduced<int>(
+                    intList, MultiplyBy2(), IntSumReduceMoveOnly()).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result =
+                QtConcurrent::mappedReduced<int>(intList.begin(), intList.end(),
+                                                 MultiplyBy2(), IntSumReduceMoveOnly()).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(intList, MultiplyBy2(),
+                                                                     IntSumReduceMoveOnly());
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                intList.begin(), intList.end(), MultiplyBy2(), IntSumReduceMoveOnly());
+        QCOMPARE(result, sum);
+    }
+
+    QThreadPool pool;
+    {
+        const auto result = QtConcurrent::mappedReduced<int>(&pool, intList, MultiplyBy2(),
+                                                             IntSumReduceMoveOnly()).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result =
+                QtConcurrent::mappedReduced<int>(&pool, intList.begin(), intList.end(),
+                                                 MultiplyBy2(), IntSumReduceMoveOnly()).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(&pool, intList, MultiplyBy2(),
+                                                                     IntSumReduceMoveOnly());
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                &pool, intList.begin(), intList.end(), MultiplyBy2(), IntSumReduceMoveOnly());
+        QCOMPARE(result, sum);
     }
 }
 
@@ -1290,6 +1387,61 @@ void tst_QtConcurrentMap::mappedReducedInitialValueThreadPool()
         auto result = QtConcurrent::blockingMappedReduced(&pool, MoveOnlyVector({ 1, 2, 3 }),
                                                           intCube, intSumReduce, intInitial);
         QCOMPARE(result, sumOfCubes);
+    }
+}
+
+void tst_QtConcurrentMap::mappedReducedInitialValueWithMoveOnlyCallable()
+{
+    const QList<int> intList { 1, 2, 3 };
+    const auto initialValue = 10;
+    const auto sum = 22;
+    {
+        const auto result =
+                QtConcurrent::mappedReduced<int>(intList, MultiplyBy2(),
+                                                 IntSumReduceMoveOnly(), initialValue).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result =
+                QtConcurrent::mappedReduced<int>(intList.begin(), intList.end(), MultiplyBy2(),
+                                                 IntSumReduceMoveOnly(), initialValue).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                intList, MultiplyBy2(), IntSumReduceMoveOnly(), initialValue);
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                intList.begin(), intList.end(), MultiplyBy2(), IntSumReduceMoveOnly(),
+                initialValue);
+        QCOMPARE(result, sum);
+    }
+
+    QThreadPool pool;
+    {
+        const auto result =
+                QtConcurrent::mappedReduced<int>(&pool, intList, MultiplyBy2(),
+                                                 IntSumReduceMoveOnly(), initialValue).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::mappedReduced<int>(&pool, intList.begin(), intList.end(),
+                                                             MultiplyBy2(), IntSumReduceMoveOnly(),
+                                                             initialValue).result();
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                &pool, intList, MultiplyBy2(), IntSumReduceMoveOnly(), initialValue);
+        QCOMPARE(result, sum);
+    }
+    {
+        const auto result = QtConcurrent::blockingMappedReduced<int>(
+                &pool, intList.begin(), intList.end(), MultiplyBy2(), IntSumReduceMoveOnly(),
+                initialValue);
+        QCOMPARE(result, sum);
     }
 }
 

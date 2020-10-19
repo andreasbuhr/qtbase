@@ -50,6 +50,10 @@
 
 #include <glib.h>
 
+// declaring our variant of g_main_context_iteration
+gboolean
+qt_g_main_context_iteration (GMainContext *context, gboolean may_block, gboolean all_priorities);
+
 QT_BEGIN_NAMESPACE
 
 struct GPollFDWithQSocketNotifier
@@ -424,7 +428,8 @@ bool QEventDispatcherGlib::processEvents(QEventLoop::ProcessEventsFlags flags)
         d->timerSource->runWithIdlePriority = false;
     }
 
-    bool result = g_main_context_iteration(d->mainContext, canWait);
+    // start processing all priorities
+    bool result = qt_g_main_context_iteration(d->mainContext, canWait, true);
     while (!result && canWait)
         result = g_main_context_iteration(d->mainContext, canWait);
 
@@ -605,5 +610,335 @@ QEventDispatcherGlib::QEventDispatcherGlib(QEventDispatcherGlibPrivate &dd, QObj
 }
 
 QT_END_NAMESPACE
+
+// defining glib internal data structures
+
+typedef struct _GPollRec GPollRec;
+
+struct _GPollRec
+{
+    GPollFD *fd;
+    GPollRec *prev;
+    GPollRec *next;
+    gint priority;
+};
+typedef struct _GPollRec GPollRec;
+
+typedef struct _GWakeup GWakeup;
+
+struct _GMainContext
+{
+    /* The following lock is used for both the list of sources
+     * and the list of poll records
+     */
+    GMutex mutex;
+    GCond cond;
+    GThread *owner;
+    guint owner_count;
+    GSList *waiters;
+
+    volatile gint ref_count;
+
+    GHashTable *sources;              /* guint -> GSource */
+
+    GPtrArray *pending_dispatches;
+    gint timeout;			/* Timeout for current iteration */
+
+    guint next_id;
+    GList *source_lists;
+    gint in_check_or_prepare;
+
+    GPollRec *poll_records;
+    guint n_poll_records;
+    GPollFD *cached_poll_array;
+    guint cached_poll_array_size;
+
+    GWakeup *wakeup;
+
+    GPollFD wake_up_rec;
+
+/* Flag indicating whether the set of fd's changed during a poll */
+    gboolean poll_changed;
+
+    GPollFunc poll_func;
+
+    gint64   time;
+    gboolean time_is_fresh;
+};
+
+struct _GMainWaiter
+{
+    GCond *cond;
+    GMutex *mutex;
+};
+typedef struct _GMainWaiter GMainWaiter;
+
+// declaring glib internal functions
+
+static gboolean
+qt_g_main_context_iterate (GMainContext *context,
+                           gboolean      block,
+                           gboolean      dispatch,
+                           GThread      *self,
+                           gboolean all_priorities);
+
+static void
+qt_g_main_context_poll (GMainContext *context,
+                        gint          timeout,
+                        gint          priority,
+                        GPollFD      *fds,
+                        gint          n_fds);
+
+// glib internal defines
+
+#define LOCK_CONTEXT(context) g_mutex_lock (&context->mutex)
+#define UNLOCK_CONTEXT(context) g_mutex_unlock (&context->mutex)
+#define G_TRACE_CURRENT_TIME 0
+#define G_THREAD_SELF g_thread_self ()
+
+// redefining glib functions
+
+gboolean
+qt_g_main_context_iteration (GMainContext *context, gboolean may_block, gboolean all_priorities)
+{
+    gboolean retval;
+
+    if (!context)
+        context = g_main_context_default();
+
+    LOCK_CONTEXT (context);
+    retval = qt_g_main_context_iterate (context, may_block, TRUE, g_thread_self (), all_priorities);
+    UNLOCK_CONTEXT (context);
+
+    return retval;
+}
+
+static gboolean
+qt_g_main_context_wait_internal (GMainContext *context,
+                              GCond        *cond,
+                              GMutex       *mutex)
+{
+    gboolean result = FALSE;
+    GThread *self = G_THREAD_SELF;
+    gboolean loop_internal_waiter;
+
+    if (context == NULL)
+        context = g_main_context_default ();
+
+    loop_internal_waiter = (mutex == &context->mutex);
+
+    if (!loop_internal_waiter)
+        LOCK_CONTEXT (context);
+
+    if (context->owner && context->owner != self)
+    {
+        GMainWaiter waiter;
+
+        waiter.cond = cond;
+        waiter.mutex = mutex;
+
+        context->waiters = g_slist_append (context->waiters, &waiter);
+
+        if (!loop_internal_waiter)
+            UNLOCK_CONTEXT (context);
+        g_cond_wait (cond, mutex);
+        if (!loop_internal_waiter)
+            LOCK_CONTEXT (context);
+
+        context->waiters = g_slist_remove (context->waiters, &waiter);
+    }
+
+    if (!context->owner)
+    {
+        context->owner = self;
+        g_assert (context->owner_count == 0);
+    }
+
+    if (context->owner == self)
+    {
+        context->owner_count++;
+        result = TRUE;
+    }
+
+    if (!loop_internal_waiter)
+        UNLOCK_CONTEXT (context);
+
+    return result;
+}
+
+static gboolean
+qt_g_main_context_iterate (GMainContext *context,
+                        gboolean      block,
+                        gboolean      dispatch,
+                        GThread      *,
+                        gboolean all_priorities)
+{
+    gint max_priority;
+    gint timeout;
+    gboolean some_ready;
+    gint nfds, allocated_nfds;
+    GPollFD *fds = NULL;
+    gint64 begin_time_nsec G_GNUC_UNUSED;
+
+    UNLOCK_CONTEXT (context);
+
+    begin_time_nsec = G_TRACE_CURRENT_TIME;
+
+    if (!g_main_context_acquire (context))
+    {
+        gboolean got_ownership;
+
+        LOCK_CONTEXT (context);
+
+        if (!block)
+            return FALSE;
+
+        got_ownership = qt_g_main_context_wait_internal (context,
+                                                      &context->cond,
+                                                      &context->mutex);
+
+        if (!got_ownership)
+            return FALSE;
+    }
+    else
+        LOCK_CONTEXT (context);
+
+    if (!context->cached_poll_array)
+    {
+        context->cached_poll_array_size = context->n_poll_records;
+        context->cached_poll_array = g_new (GPollFD, context->n_poll_records);
+    }
+
+    allocated_nfds = context->cached_poll_array_size;
+    fds = context->cached_poll_array;
+
+    UNLOCK_CONTEXT (context);
+
+    g_main_context_prepare (context, &max_priority);
+
+    // only the following two lines are different from glib implementation
+    if (all_priorities)
+        max_priority = G_MAXINT;
+
+    while ((nfds = g_main_context_query (context, max_priority, &timeout, fds,
+                                         allocated_nfds)) > allocated_nfds)
+    {
+        LOCK_CONTEXT (context);
+        g_free (fds);
+        context->cached_poll_array_size = allocated_nfds = nfds;
+        context->cached_poll_array = fds = g_new (GPollFD, nfds);
+        UNLOCK_CONTEXT (context);
+    }
+
+    if (!block)
+        timeout = 0;
+
+    qt_g_main_context_poll (context, timeout, max_priority, fds, nfds);
+
+    some_ready = g_main_context_check (context, max_priority, fds, nfds);
+
+    if (dispatch)
+        g_main_context_dispatch (context);
+
+    g_main_context_release (context);
+
+    LOCK_CONTEXT (context);
+
+    return some_ready;
+}
+
+static void
+qt_g_main_context_poll (GMainContext *context,
+                     gint          timeout,
+                     gint          ,
+                     GPollFD      *fds,
+                     gint          n_fds)
+{
+#ifdef  G_MAIN_POLL_DEBUG
+    GTimer *poll_timer;
+  GPollRec *pollrec;
+  gint i;
+#endif
+
+    GPollFunc poll_func;
+
+    if (n_fds || timeout != 0)
+    {
+        int ret, errsv;
+
+#ifdef	G_MAIN_POLL_DEBUG
+        poll_timer = NULL;
+      if (_g_main_poll_debug)
+	{
+	  g_print ("polling context=%p n=%d timeout=%d\n",
+		   context, n_fds, timeout);
+	  poll_timer = g_timer_new ();
+	}
+#endif
+
+        LOCK_CONTEXT (context);
+
+        poll_func = context->poll_func;
+
+        UNLOCK_CONTEXT (context);
+        ret = (*poll_func) (fds, n_fds, timeout);
+        errsv = errno;
+        if (ret < 0 && errsv != EINTR)
+        {
+#ifndef G_OS_WIN32
+            g_warning ("poll(2) failed due to: %s.",
+                       g_strerror (errsv));
+#else
+
+#endif
+        }
+
+#ifdef	G_MAIN_POLL_DEBUG
+        if (_g_main_poll_debug)
+	{
+	  LOCK_CONTEXT (context);
+
+	  g_print ("g_main_poll(%d) timeout: %d - elapsed %12.10f seconds",
+		   n_fds,
+		   timeout,
+		   g_timer_elapsed (poll_timer, NULL));
+	  g_timer_destroy (poll_timer);
+	  pollrec = context->poll_records;
+
+	  while (pollrec != NULL)
+	    {
+	      i = 0;
+	      while (i < n_fds)
+		{
+		  if (fds[i].fd == pollrec->fd->fd &&
+		      pollrec->fd->events &&
+		      fds[i].revents)
+		    {
+		      g_print (" [" G_POLLFD_FORMAT " :", fds[i].fd);
+		      if (fds[i].revents & G_IO_IN)
+			g_print ("i");
+		      if (fds[i].revents & G_IO_OUT)
+			g_print ("o");
+		      if (fds[i].revents & G_IO_PRI)
+			g_print ("p");
+		      if (fds[i].revents & G_IO_ERR)
+			g_print ("e");
+		      if (fds[i].revents & G_IO_HUP)
+			g_print ("h");
+		      if (fds[i].revents & G_IO_NVAL)
+			g_print ("n");
+		      g_print ("]");
+		    }
+		  i++;
+		}
+	      pollrec = pollrec->next;
+	    }
+	  g_print ("\n");
+
+	  UNLOCK_CONTEXT (context);
+	}
+#endif
+    }
+}
 
 #include "moc_qeventdispatcher_glib_p.cpp"

@@ -107,6 +107,7 @@ public:
     GTimerSource *timerSource;
     GIdleTimerSource *idleTimerSource;
     bool wakeUpCalled = true;
+    bool qtEventProcessingDisabled = false;
 
     void runTimersOnceWithNormalPriority();
 };

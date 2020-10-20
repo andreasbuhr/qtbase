@@ -58,9 +58,15 @@ struct GPollFDWithQSocketNotifier
     QSocketNotifier *socketNotifier;
 };
 
-struct GSocketNotifierSource
+struct QGSource
 {
     GSource source;
+    QEventDispatcherGlibPrivate *dispatcher;
+};
+
+struct GSocketNotifierSource
+{
+    QGSource source;
     QList<GPollFDWithQSocketNotifier *> pollfds;
 };
 
@@ -73,6 +79,9 @@ static gboolean socketNotifierSourcePrepare(GSource *, gint *timeout)
 
 static gboolean socketNotifierSourceCheck(GSource *source)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     GSocketNotifierSource *src = reinterpret_cast<GSocketNotifierSource *>(source);
 
     bool pending = false;
@@ -121,7 +130,7 @@ static GSourceFuncs socketNotifierSourceFuncs = {
 
 struct GTimerSource
 {
-    GSource source;
+    QGSource source;
     QTimerInfoList timerList;
     QEventLoop::ProcessEventsFlags processEventsFlags;
     bool runWithIdlePriority;
@@ -152,6 +161,9 @@ static gboolean timerSourceCheckHelper(GTimerSource *src)
 
 static gboolean timerSourcePrepare(GSource *source, gint *timeout)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     gint dummy;
     if (!timeout)
         timeout = &dummy;
@@ -168,6 +180,9 @@ static gboolean timerSourcePrepare(GSource *source, gint *timeout)
 
 static gboolean timerSourceCheck(GSource *source)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     GTimerSource *src = reinterpret_cast<GTimerSource *>(source);
     if (src->runWithIdlePriority)
         return false;
@@ -195,12 +210,15 @@ static GSourceFuncs timerSourceFuncs = {
 
 struct GIdleTimerSource
 {
-    GSource source;
+    QGSource source;
     GTimerSource *timerSource;
 };
 
 static gboolean idleTimerSourcePrepare(GSource *source, gint *timeout)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     GIdleTimerSource *idleTimerSource = reinterpret_cast<GIdleTimerSource *>(source);
     GTimerSource *timerSource = idleTimerSource->timerSource;
     if (!timerSource->runWithIdlePriority) {
@@ -215,6 +233,9 @@ static gboolean idleTimerSourcePrepare(GSource *source, gint *timeout)
 
 static gboolean idleTimerSourceCheck(GSource *source)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     GIdleTimerSource *idleTimerSource = reinterpret_cast<GIdleTimerSource *>(source);
     GTimerSource *timerSource = idleTimerSource->timerSource;
     if (!timerSource->runWithIdlePriority) {
@@ -227,7 +248,7 @@ static gboolean idleTimerSourceCheck(GSource *source)
 static gboolean idleTimerSourceDispatch(GSource *source, GSourceFunc, gpointer)
 {
     GTimerSource *timerSource = reinterpret_cast<GIdleTimerSource *>(source)->timerSource;
-    (void) timerSourceDispatch(&timerSource->source, nullptr, nullptr);
+    (void)timerSourceDispatch(&timerSource->source.source, nullptr, nullptr);
     return true;
 }
 
@@ -242,7 +263,7 @@ static GSourceFuncs idleTimerSourceFuncs = {
 
 struct GPostEventSource
 {
-    GSource source;
+    QGSource source;
     QAtomicInt serialNumber;
     int lastSerialNumber;
     QEventDispatcherGlibPrivate *d;
@@ -250,6 +271,9 @@ struct GPostEventSource
 
 static gboolean postEventSourcePrepare(GSource *s, gint *timeout)
 {
+    if (reinterpret_cast<QGSource *>(s)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     QThreadData *data = QThreadData::current();
     if (!data)
         return false;
@@ -267,6 +291,9 @@ static gboolean postEventSourcePrepare(GSource *s, gint *timeout)
 
 static gboolean postEventSourceCheck(GSource *source)
 {
+    if (reinterpret_cast<QGSource *>(source)->dispatcher->qtEventProcessingDisabled)
+        return false;
+
     return postEventSourcePrepare(source, nullptr);
 }
 
@@ -320,33 +347,37 @@ QEventDispatcherGlibPrivate::QEventDispatcherGlibPrivate(GMainContext *context)
     // setup post event source
     postEventSource = reinterpret_cast<GPostEventSource *>(g_source_new(&postEventSourceFuncs,
                                                                         sizeof(GPostEventSource)));
+    reinterpret_cast<QGSource *>(postEventSource)->dispatcher = this;
     postEventSource->serialNumber.storeRelaxed(1);
     postEventSource->d = this;
-    g_source_set_can_recurse(&postEventSource->source, true);
-    g_source_attach(&postEventSource->source, mainContext);
+    g_source_set_can_recurse(&postEventSource->source.source, true);
+    g_source_attach(&postEventSource->source.source, mainContext);
 
     // setup socketNotifierSource
     socketNotifierSource =
         reinterpret_cast<GSocketNotifierSource *>(g_source_new(&socketNotifierSourceFuncs,
                                                                sizeof(GSocketNotifierSource)));
+    reinterpret_cast<QGSource *>(socketNotifierSource)->dispatcher = this;
     (void) new (&socketNotifierSource->pollfds) QList<GPollFDWithQSocketNotifier *>();
-    g_source_set_can_recurse(&socketNotifierSource->source, true);
-    g_source_attach(&socketNotifierSource->source, mainContext);
+    g_source_set_can_recurse(&socketNotifierSource->source.source, true);
+    g_source_attach(&socketNotifierSource->source.source, mainContext);
 
     // setup normal and idle timer sources
     timerSource = reinterpret_cast<GTimerSource *>(g_source_new(&timerSourceFuncs,
                                                                 sizeof(GTimerSource)));
+    reinterpret_cast<QGSource *>(timerSource)->dispatcher = this;
     (void) new (&timerSource->timerList) QTimerInfoList();
     timerSource->processEventsFlags = QEventLoop::AllEvents;
     timerSource->runWithIdlePriority = false;
-    g_source_set_can_recurse(&timerSource->source, true);
-    g_source_attach(&timerSource->source, mainContext);
+    g_source_set_can_recurse(&timerSource->source.source, true);
+    g_source_attach(&timerSource->source.source, mainContext);
 
     idleTimerSource = reinterpret_cast<GIdleTimerSource *>(g_source_new(&idleTimerSourceFuncs,
                                                                         sizeof(GIdleTimerSource)));
+    reinterpret_cast<QGSource *>(idleTimerSource)->dispatcher = this;
     idleTimerSource->timerSource = timerSource;
-    g_source_set_can_recurse(&idleTimerSource->source, true);
-    g_source_attach(&idleTimerSource->source, mainContext);
+    g_source_set_can_recurse(&idleTimerSource->source.source, true);
+    g_source_attach(&idleTimerSource->source.source, mainContext);
 }
 
 void QEventDispatcherGlibPrivate::runTimersOnceWithNormalPriority()
@@ -370,27 +401,27 @@ QEventDispatcherGlib::~QEventDispatcherGlib()
     // destroy all timer sources
     qDeleteAll(d->timerSource->timerList);
     d->timerSource->timerList.~QTimerInfoList();
-    g_source_destroy(&d->timerSource->source);
-    g_source_unref(&d->timerSource->source);
+    g_source_destroy(&d->timerSource->source.source);
+    g_source_unref(&d->timerSource->source.source);
     d->timerSource = nullptr;
-    g_source_destroy(&d->idleTimerSource->source);
-    g_source_unref(&d->idleTimerSource->source);
+    g_source_destroy(&d->idleTimerSource->source.source);
+    g_source_unref(&d->idleTimerSource->source.source);
     d->idleTimerSource = nullptr;
 
     // destroy socket notifier source
     for (int i = 0; i < d->socketNotifierSource->pollfds.count(); ++i) {
         GPollFDWithQSocketNotifier *p = d->socketNotifierSource->pollfds[i];
-        g_source_remove_poll(&d->socketNotifierSource->source, &p->pollfd);
+        g_source_remove_poll(&d->socketNotifierSource->source.source, &p->pollfd);
         delete p;
     }
     d->socketNotifierSource->pollfds.~QList<GPollFDWithQSocketNotifier *>();
-    g_source_destroy(&d->socketNotifierSource->source);
-    g_source_unref(&d->socketNotifierSource->source);
+    g_source_destroy(&d->socketNotifierSource->source.source);
+    g_source_unref(&d->socketNotifierSource->source.source);
     d->socketNotifierSource = nullptr;
 
     // destroy post event source
-    g_source_destroy(&d->postEventSource->source);
-    g_source_unref(&d->postEventSource->source);
+    g_source_destroy(&d->postEventSource->source.source);
+    g_source_unref(&d->postEventSource->source.source);
     d->postEventSource = nullptr;
 
     Q_ASSERT(d->mainContext != nullptr);
@@ -420,9 +451,17 @@ bool QEventDispatcherGlib::processEvents(QEventLoop::ProcessEventsFlags flags)
         d->timerSource->runWithIdlePriority = false;
     }
 
-    bool result = g_main_context_iteration(d->mainContext, canWait);
-    while (!result && canWait)
-        result = g_main_context_iteration(d->mainContext, canWait);
+    bool result = false;
+    if (canWait) {
+        while (!result)
+            result = g_main_context_iteration(d->mainContext, canWait);
+    } else {
+        bool result = g_main_context_iteration(d->mainContext, canWait);
+        d->qtEventProcessingDisabled = true;
+        while (result)
+            result = g_main_context_iteration(d->mainContext, canWait);
+        d->qtEventProcessingDisabled = false;
+    }
 
     d->timerSource->processEventsFlags = savedFlags;
 
@@ -468,7 +507,7 @@ void QEventDispatcherGlib::registerSocketNotifier(QSocketNotifier *notifier)
 
     d->socketNotifierSource->pollfds.append(p);
 
-    g_source_add_poll(&d->socketNotifierSource->source, &p->pollfd);
+    g_source_add_poll(&d->socketNotifierSource->source.source, &p->pollfd);
 }
 
 void QEventDispatcherGlib::unregisterSocketNotifier(QSocketNotifier *notifier)
@@ -492,7 +531,7 @@ void QEventDispatcherGlib::unregisterSocketNotifier(QSocketNotifier *notifier)
         GPollFDWithQSocketNotifier *p = d->socketNotifierSource->pollfds.at(i);
         if (p->socketNotifier == notifier) {
             // found it
-            g_source_remove_poll(&d->socketNotifierSource->source, &p->pollfd);
+            g_source_remove_poll(&d->socketNotifierSource->source.source, &p->pollfd);
 
             d->socketNotifierSource->pollfds.removeAt(i);
             delete p;

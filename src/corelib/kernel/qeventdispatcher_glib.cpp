@@ -253,6 +253,10 @@ static gboolean postEventSourcePrepare(GSource *s, gint *timeout)
     QThreadData *data = QThreadData::current();
     if (!data)
         return false;
+    GPostEventSource *source = reinterpret_cast<GPostEventSource *>(s);
+
+    if (source->d->sendPostedEventsOnlyOnce && source->d->sendPostedEventsCalled)
+        return false;
 
     gint dummy;
     if (!timeout)
@@ -260,7 +264,6 @@ static gboolean postEventSourcePrepare(GSource *s, gint *timeout)
     const bool canWait = data->canWaitLocked();
     *timeout = canWait ? -1 : 0;
 
-    GPostEventSource *source = reinterpret_cast<GPostEventSource *>(s);
     source->d->wakeUpCalled = source->serialNumber.loadRelaxed() != source->lastSerialNumber;
     return !canWait || source->d->wakeUpCalled;
 }
@@ -274,8 +277,16 @@ static gboolean postEventSourceDispatch(GSource *s, GSourceFunc, gpointer)
 {
     GPostEventSource *source = reinterpret_cast<GPostEventSource *>(s);
     source->lastSerialNumber = source->serialNumber.loadRelaxed();
-    QCoreApplication::sendPostedEvents();
-    source->d->runTimersOnceWithNormalPriority();
+    if (source->d->sendPostedEventsOnlyOnce) {
+        if (!source->d->sendPostedEventsCalled) {
+            QCoreApplication::sendPostedEvents();
+            source->d->runTimersOnceWithNormalPriority();
+            source->d->sendPostedEventsCalled = true;
+        }
+    } else {
+        QCoreApplication::sendPostedEvents();
+        source->d->runTimersOnceWithNormalPriority();
+    }
     return true; // i dunno, george...
 }
 
@@ -420,9 +431,21 @@ bool QEventDispatcherGlib::processEvents(QEventLoop::ProcessEventsFlags flags)
         d->timerSource->runWithIdlePriority = false;
     }
 
+    bool sendPostedEventsOnlyOnceWas = d->sendPostedEventsOnlyOnce;
+    bool sendPostedEventsCalledWas = d->sendPostedEventsCalled;
+
+    d->sendPostedEventsOnlyOnce = true;
+    d->sendPostedEventsCalled = false;
     bool result = g_main_context_iteration(d->mainContext, canWait);
     while (!result && canWait)
         result = g_main_context_iteration(d->mainContext, canWait);
+
+    bool moreToProcess(result);
+    while (moreToProcess)
+        moreToProcess = g_main_context_iteration(d->mainContext, canWait);
+
+    d->sendPostedEventsOnlyOnce = sendPostedEventsOnlyOnceWas;
+    d->sendPostedEventsCalled = sendPostedEventsCalledWas;
 
     d->timerSource->processEventsFlags = savedFlags;
 

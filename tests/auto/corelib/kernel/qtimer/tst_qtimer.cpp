@@ -94,6 +94,7 @@ void tst_QTimer::zeroTimer()
 {
     QTimer timer;
     timer.setInterval(0);
+    timer.setSingleShot(true);
 
     QSignalSpy timeoutSpy(&timer, &QTimer::timeout);
     timer.start();

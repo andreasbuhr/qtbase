@@ -108,6 +108,9 @@ public:
     GIdleTimerSource *idleTimerSource;
     bool wakeUpCalled = true;
 
+    bool sendPostedEventsOnlyOnce = false;
+    bool sendPostedEventsCalled = false;
+
     void runTimersOnceWithNormalPriority();
 };
 

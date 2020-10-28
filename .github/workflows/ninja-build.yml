@@ -78,7 +78,7 @@ jobs:
     - name: configure
       working-directory: build
       run:  ../configure -cmake -opensource -confirm-license -no-pch \
-        \ -debug \
+        \ -debug -make examples -make tests \
         \ -qt-harfbuzz \
         \ ${{ matrix.configure_flags }}
     - name: ninja

@@ -27,6 +27,12 @@ jobs:
             tools: ninja-build
             install_cmd: sudo apt-get -y install
             configure_flags: -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
+          - name: ubuntu-18.04-testnamespace
+            os:   ubuntu-18.04
+            deps:  libgl-dev libglu-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev
+            tools: ninja-build
+            install_cmd: sudo apt-get -y install
+            configure_flags: -qtnamespace TestNamespace -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
           - name: macos-10.15
             os:   macos-10.15
             deps:  jpeg sqlite

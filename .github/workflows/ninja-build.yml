@@ -5,7 +5,6 @@
 # - no optimizations
 # - link to system-provided libraries instead of bulding
 #   bundled 3rd party libraries
-# - ccache
 
 name: Smoke build
 
@@ -25,13 +24,19 @@ jobs:
           - name: ubuntu-18.04
             os:   ubuntu-18.04
             deps:  libgl-dev libglu-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev
-            tools: ninja-build ccache
+            tools: ninja-build
             install_cmd: sudo apt-get -y install
             configure_flags: -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
+          - name: ubuntu-18.04-testnamespace
+            os:   ubuntu-18.04
+            deps:  libgl-dev libglu-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev
+            tools: ninja-build
+            install_cmd: sudo apt-get -y install
+            configure_flags: -qtnamespace TestNamespace -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
           - name: macos-10.15
             os:   macos-10.15
             deps:  jpeg sqlite
-            tools: ninja ccache pkg-config
+            tools: ninja pkg-config
             install_cmd: brew install
             # Specifically on macOS pkg_config has to be manually turned on otherwise libraries under /usr/local are not detected.
             configure_flags: -feature-pkg-config -system-sqlite -system-libjpeg
@@ -41,7 +46,7 @@ jobs:
             install_cmd_postfix: --yes --no-progress
             # Chocolatey sqlite package does not come with headers, so we build with bundled sqlite.
             #deps: sqlite
-            tools: ninja ccache
+            tools: ninja
             # We don't want the system headers / libraries from Strawberry Perl while compiling with MinGW 8.1.0
             configure_flags: -qt-sqlite -qt-pcre -qt-zlib -qt-freetype -qt-libpng -qt-libjpeg -no-feature-sql-psql -no-feature-sql-mysql -no-feature-sql-odbc
     runs-on: ${{ matrix.os }}
@@ -60,22 +65,6 @@ jobs:
 
     - uses: actions/checkout@v2
 
-    - name: restore ccache
-      id: ccache
-      uses: actions/cache@v2
-      with:
-        path: ~/.ccache
-        # "github.run_id" is unique, which causes the cache to always get
-        # saved at the end of a successful run.
-        key:  ccache-${{ matrix.os }}-${{ github.ref }}-${{ github.run_id }}
-        # As the unique "key" above will never be found in the cache when the
-        # job starts, we need these broader "restore-keys" in order to match
-        # and restore the most recent cache.
-        restore-keys: |
-          ccache-${{ matrix.os }}-${{ github.ref }}-
-          ccache-${{ matrix.os }}-refs/heads/dev-
-          ccache-${{ matrix.os }}-
-
     - name: install build dependencies
       run:  ${{ matrix.install_cmd }}  ${{ matrix.deps }}  ${{ matrix.install_cmd_postfix }}
       if: matrix.deps != ''
@@ -87,7 +76,6 @@ jobs:
         cmake --version  | head -1
         echo Ninja `ninja --version`
         { ninja --help || true ; } 2>&1 | grep "run N jobs in parallel"
-        ccache --version | head -1
         echo Environment:
         printenv
 
@@ -95,14 +83,11 @@ jobs:
       run:  mkdir build
     - name: configure
       working-directory: build
-      run:  ../configure -cmake -opensource -confirm-license -ccache -no-pch \
-        \ -debug -nomake tests -nomake examples \
+      run:  ../configure -cmake -opensource -confirm-license -no-pch \
+        \ -debug -make examples -make tests \
         \ -qt-harfbuzz \
         \ ${{ matrix.configure_flags }}
     - name: ninja
       working-directory: build
       run: ninja
 
-    - name: various stats
-      # Print ccache utilization statistics, then reset them.
-      run:  ccache -s && ccache -z

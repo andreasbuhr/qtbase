@@ -56,14 +56,13 @@ jobs:
 
     steps:
 
-    - name: add Repos Linux
-      if: matrix.extra_repository != ''
-      run: |
-        sudo apt-get install -y apt-transport-https ca-certificates gnupg software-properties-common wget
-        sudo apt-add-repository "${{ matrix.extra_repository }}"
     - name: prepare Linux
       if: runner.os == 'Linux'
-      run: sudo apt-get update
+      run: |
+        sudo apt-get install -y apt-transport-https ca-certificates gnupg software-properties-common wget
+        wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+        sudo apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main'
+        sudo apt-get update
     - name: prepare Windows
       if: runner.os == 'Windows'
       # Header pthread.h from postgres is included and creates issues.

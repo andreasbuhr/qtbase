@@ -23,14 +23,16 @@ jobs:
         include:
           - name: ubuntu-18.04
             os:   ubuntu-18.04
+            extra_repository: 'deb https://apt.kitware.com/ubuntu/ bionic main'
             deps:  libgl-dev libglu-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev
-            tools: ninja-build
+            tools: ninja-build cmake
             install_cmd: sudo apt-get -y install
             configure_flags: -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
           - name: ubuntu-18.04-testnamespace
             os:   ubuntu-18.04
+            extra_repository: 'deb https://apt.kitware.com/ubuntu/ bionic main'
             deps:  libgl-dev libglu-dev libpcre2-dev libz-dev libfreetype6-dev libpng-dev libjpeg-dev libsqlite3-dev
-            tools: ninja-build
+            tools: ninja-build cmake
             install_cmd: sudo apt-get -y install
             configure_flags: -qtnamespace TestNamespace -system-sqlite -system-pcre -system-zlib -system-freetype -system-libpng -system-libjpeg
           - name: macos-10.15
@@ -54,6 +56,11 @@ jobs:
 
     steps:
 
+    - name: add Repos Linux
+      if: matrix.extra_repository != ''
+      run: |
+        sudo apt-get install -y apt-transport-https ca-certificates gnupg software-properties-common wget
+        sudo apt-add-repository "${{ matrix.extra_repository }}"
     - name: prepare Linux
       if: runner.os == 'Linux'
       run: sudo apt-get update

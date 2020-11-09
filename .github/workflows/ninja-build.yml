@@ -60,7 +60,7 @@ jobs:
       if: matrix.extra_repository != ''
       run: |
         sudo apt-get install -y apt-transport-https ca-certificates gnupg software-properties-common wget
-        sudo apt-add-repository ${{ matrix.extra_repository }}
+        sudo apt-add-repository "${{ matrix.extra_repository }}"
     - name: prepare Linux
       if: runner.os == 'Linux'
       run: sudo apt-get update

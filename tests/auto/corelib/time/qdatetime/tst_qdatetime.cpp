@@ -46,6 +46,7 @@ public:
 public Q_SLOTS:
     void initTestCase();
 private Q_SLOTS:
+    void debugOut();
     void ctor();
     void operator_eq();
     void isNull();
@@ -272,6 +273,12 @@ void tst_QDateTime::initTestCase()
              << "the Central European timezone";
 }
 
+void tst_QDateTime::debugOut(){
+    auto date = QDate(2007, 03, 25);
+    auto timeInDst = QTime(2, 30);
+    auto dateTimeInDst  = QDateTime(date, timeInDst);
+    qDebug() << "seconds since midnight:" << (dateTimeInDst.toMSecsSinceEpoch() - 1174777200000) / 1000;
+}
 void tst_QDateTime::ctor()
 {
     QDateTime dt1(QDate(2004, 1, 2), QTime(1, 2, 3));

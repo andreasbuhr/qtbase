@@ -2853,6 +2853,7 @@ static void refreshZonedDateTime(QDateTimeData &d, Qt::TimeSpec spec)
         // LocalTime and TimeZone might fall into a "missing" DST transition hour
         // Calling toEpochMSecs will adjust the returned date/time if it does
         const qint64 msecs = getMSecs(d);
+        qDebug() << __FILE__ << __LINE__ << "msecs" << (msecs - 1174777200000) / 1000;
         qint64 epochMSecs = 0;
         QDate testDate;
         QTime testTime;

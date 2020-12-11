@@ -4754,6 +4754,9 @@ void tst_QDateTimeEdit::stepIntoDSTGap_data()
     QTest::addColumn<QDateTime>("end");
 
     const QTimeZone timeZone = QTimeZone::systemTimeZone();
+    qDebug() << "system time zone is" << timeZone;
+    qDebug() << "system time zone has daylight" << timeZone.hasDaylightTime();
+
     if (!timeZone.hasDaylightTime())
         QSKIP("This test needs to run in a timezone that observes DST!");
 

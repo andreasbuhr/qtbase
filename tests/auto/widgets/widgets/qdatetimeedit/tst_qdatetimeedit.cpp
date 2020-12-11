@@ -4624,7 +4624,7 @@ static QDateTime findSpring(int year, const QTimeZone &timeZone)
     qDebug() << "finding transition for " << year;
     qDebug() << "timeZone is" << timeZone;
     // Southern hemisphere spring is after midsummer
-    const QDateTime midSummer = QDate(year, 6, 21).startOfDay();
+    const QDateTime midSummer = QDate(year, 6, 21).startOfDay(timeZone);
     qDebug() << "is daylight?" << midSummer.isDaylightTime();
     const QTimeZone::OffsetData transition =
         midSummer.isDaylightTime() ? timeZone.previousTransition(midSummer)

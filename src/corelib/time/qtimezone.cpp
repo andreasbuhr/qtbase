@@ -727,9 +727,21 @@ QTimeZone::OffsetData QTimeZone::nextTransition(const QDateTime &afterDateTime) 
 
 QTimeZone::OffsetData QTimeZone::previousTransition(const QDateTime &beforeDateTime) const
 {
-    if (hasTransitions())
-        return QTimeZonePrivate::toOffsetData(d->previousTransition(beforeDateTime.toMSecsSinceEpoch()));
+    if (hasTransitions()){
+        auto a = beforeDateTime.toMSecsSinceEpoch();
+        QTimeZonePrivate::Data b = d->previousTransition(a);
+        auto c = QTimeZonePrivate::toOffsetData(b);
+        qDebug() << "a" << a;
+        qDebug() << "b.abbreviation" << b.abbreviation;
+        qDebug() << "b.atUtc" << b.atMSecsSinceEpoch;
+        qDebug() << "b.offsetFromUtc" << b.offsetFromUtc;
+        qDebug() << "b.standardTimeOffset" << b.standardTimeOffset;
+        qDebug() << "b.daylightTimeOffset" << b.daylightTimeOffset;
+        //qDebug() << "c" << c;
+        return c;
+    }
 
+    qDebug() << "has no transitions";
     return QTimeZonePrivate::invalidOffsetData();
 }
 

@@ -4621,12 +4621,19 @@ static QDateTime findSpring(int year, const QTimeZone &timeZone)
     if (!timeZone.hasTransitions())
         return QDateTime();
 
+    qDebug() << "finding transition for " << year;
     // Southern hemisphere spring is after midsummer
     const QDateTime midSummer = QDate(year, 6, 21).startOfDay();
     const QTimeZone::OffsetData transition =
         midSummer.isDaylightTime() ? timeZone.previousTransition(midSummer)
                                    : timeZone.nextTransition(midSummer);
+    qDebug() << "transition.abbreviation" << transition.abbreviation;
+    qDebug() << "transition.atUtc" << transition.atUtc;
+    qDebug() << "transition.offsetFromUtc" << transition.offsetFromUtc;
+    qDebug() << "transition.standardTimeOffset" << transition.standardTimeOffset;
+    qDebug() << "transition.daylightTimeOffset" << transition.daylightTimeOffset;
     const QDateTime spring = transition.atUtc.toLocalTime();
+    qDebug() << "spring is " << spring;
     // there might have been DST at some point, but not in the year we care about
     if (spring.date().year() != year || !spring.isDaylightTime())
         return QDateTime();
@@ -4749,8 +4756,11 @@ void tst_QDateTimeEdit::stepIntoDSTGap_data()
         QSKIP("This test needs to run in a timezone that observes DST!");
 
     const QDateTime springTransition = findSpring(2007, timeZone);
-    if (!springTransition.isValid())
+    qDebug() << springTransition;
+    if (!springTransition.isValid()){
+
         QSKIP("Failed to obtain valid spring forward datetime for 2007!");
+    }
 
     const QDate spring = springTransition.date();
     const int gapWidth = timeZone.daylightTimeOffset(springTransition.addDays(1));

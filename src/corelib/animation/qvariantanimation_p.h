@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtCore module of the Qt Toolkit.
@@ -77,8 +77,7 @@ public:
 
     void setDefaultStartEndValue(const QVariant &value);
 
-
-    QVariant currentValue;
+    Q_OBJECT_BINDABLE_PROPERTY(QVariantAnimationPrivate, QVariant, currentValue)
     QVariant defaultStartEndValue;
 
     //this is used to keep track of the KeyValue interval in which we currently are

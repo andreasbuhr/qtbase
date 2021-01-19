@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtCore module of the Qt Toolkit.
@@ -282,14 +282,18 @@ void QVariantAnimationPrivate::setCurrentValueForProgress(const qreal progress)
     QVariant ret = q->interpolated(currentInterval.start.second,
                                    currentInterval.end.second,
                                    localProgress);
-    qSwap(currentValue, ret);
+
+    const auto oldValue = currentValue.value();
+    currentValue.setValueBypassingBindings(ret);
     q->updateCurrentValue(currentValue);
+    currentValue.markDirty();
+
     static QBasicAtomicInt changedSignalIndex = Q_BASIC_ATOMIC_INITIALIZER(0);
     if (!changedSignalIndex.loadRelaxed()) {
         //we keep the mask so that we emit valueChanged only when needed (for performance reasons)
         changedSignalIndex.testAndSetRelaxed(0, signalIndex("valueChanged(QVariant)"));
     }
-    if (isSignalConnected(changedSignalIndex.loadRelaxed()) && currentValue != ret) {
+    if (isSignalConnected(changedSignalIndex.loadRelaxed()) && oldValue != currentValue) {
         //the value has changed
         emit q->valueChanged(currentValue);
     }
@@ -631,9 +635,15 @@ void QVariantAnimation::setKeyValues(const KeyValues &keyValues)
 QVariant QVariantAnimation::currentValue() const
 {
     Q_D(const QVariantAnimation);
-    if (!d->currentValue.isValid())
+    if (!d->currentValue.value().isValid())
         const_cast<QVariantAnimationPrivate*>(d)->recalculateCurrentInterval();
     return d->currentValue;
+}
+
+QBindable<QVariant> QVariantAnimation::bindableCurrentValue()
+{
+    Q_D(const QVariantAnimation);
+    return &d->currentValue;
 }
 
 /*!

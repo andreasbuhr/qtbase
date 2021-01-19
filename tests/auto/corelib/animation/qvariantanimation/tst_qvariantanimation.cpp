@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the test suite of the Qt Toolkit.
@@ -28,6 +28,7 @@
 
 
 #include <QtCore/qvariantanimation.h>
+#include <QtTest/qsignalspy.h>
 #include <QTest>
 
 class tst_QVariantAnimation : public QObject
@@ -44,6 +45,7 @@ private slots:
     void keyValues();
     void duration();
     void interpolation();
+    void bindings();
 };
 
 class TestableQVariantAnimation : public QVariantAnimation
@@ -152,6 +154,38 @@ void tst_QVariantAnimation::interpolation()
     pointAnim.setDuration(100);
     pointAnim.setCurrentTime(50);
     QCOMPARE(pointAnim.currentValue().toPoint(), QPoint(50, 50));
+}
+
+void tst_QVariantAnimation::bindings()
+{
+    QVariantAnimation animation;
+
+    animation.setStartValue(0);
+    animation.setEndValue(100);
+    animation.setDuration(100);
+
+    // currentValue property
+    QVERIFY(animation.bindableCurrentValue().isReadOnly());
+
+    QProperty<QVariant> currentValueObserver;
+    currentValueObserver.setBinding(animation.bindableCurrentValue().makeBinding());
+    QCOMPARE(animation.currentValue(), currentValueObserver);
+
+    QSignalSpy spy(&animation, &QVariantAnimation::valueChanged);
+
+    animation.setCurrentTime(50);
+    QCOMPARE(currentValueObserver.value().toInt(), 50);
+    QCOMPARE(spy.count(), 1);
+
+    // currentValue doesn't have a setter, setting a binding to it does nothing
+    QProperty<QVariant> currentValue;
+    animation.bindableCurrentValue().setBinding(Qt::makePropertyBinding(currentValue));
+    QVERIFY(!animation.bindableCurrentValue().hasBinding());
+    QVERIFY(animation.bindableCurrentValue().isReadOnly());
+
+    currentValue = 55;
+    QCOMPARE(animation.currentValue(), 50);
+    QCOMPARE(currentValue.value().toInt(), 55);
 }
 
 QTEST_MAIN(tst_QVariantAnimation)

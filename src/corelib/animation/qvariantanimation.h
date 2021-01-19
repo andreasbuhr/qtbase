@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2021 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the QtCore module of the Qt Toolkit.
@@ -56,7 +56,8 @@ class Q_CORE_EXPORT QVariantAnimation : public QAbstractAnimation
     Q_OBJECT
     Q_PROPERTY(QVariant startValue READ startValue WRITE setStartValue)
     Q_PROPERTY(QVariant endValue READ endValue WRITE setEndValue)
-    Q_PROPERTY(QVariant currentValue READ currentValue NOTIFY valueChanged)
+    Q_PROPERTY(QVariant currentValue READ currentValue NOTIFY valueChanged
+               BINDABLE bindableCurrentValue)
     Q_PROPERTY(int duration READ duration WRITE setDuration)
     Q_PROPERTY(QEasingCurve easingCurve READ easingCurve WRITE setEasingCurve)
 
@@ -80,6 +81,7 @@ public:
     void setKeyValues(const KeyValues &values);
 
     QVariant currentValue() const;
+    QBindable<QVariant> bindableCurrentValue();
 
     int duration() const override;
     void setDuration(int msecs);

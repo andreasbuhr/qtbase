@@ -43,6 +43,10 @@
 #include <qscopedvaluerollback.h>
 #include <QScopeGuard>
 
+#include <iostream>
+
+int indent = 0;
+
 QT_BEGIN_NAMESPACE
 
 using namespace QtPrivate;
@@ -100,7 +104,10 @@ void QPropertyBindingPrivate::unlinkAndDeref()
 
 void QPropertyBindingPrivate::markDirtyAndNotifyObservers()
 {
+    scoped_print s("QPropertyBindingPrivate::markDirtyAndNotifyObservers");
     if (eagerlyUpdating) {
+        for(int i = 0; i < indent; ++i) std::cout << " ";
+        std::cout << "error condition in " << __FILE__ << ":" << __LINE__ << std::endl;
         error = QPropertyBindingError(QPropertyBindingError::BindingLoop);
         if (isQQmlPropertyBinding)
             errorCallBack(this);
@@ -525,6 +532,8 @@ struct [[nodiscard]] QPropertyObserverNodeProtector {
  */
 void QPropertyObserverPointer::notify(QPropertyBindingPrivate *triggeringBinding, QUntypedPropertyData *propertyDataPtr, bool knownToHaveChanged)
 {
+    scoped_print s("QPropertyObserverPointer::notify");
+    int counter = 0;
     auto observer = const_cast<QPropertyObserver*>(ptr);
     /*
      * The basic idea of the loop is as follows: We iterate over all observers in the linked list,
@@ -573,6 +582,7 @@ void QPropertyObserverPointer::notify(QPropertyBindingPrivate *triggeringBinding
             auto bindingToMarkDirty =  observer->bindingToMarkDirty;
             QPropertyObserverNodeProtector protector(observer);
             bindingToMarkDirty->markDirtyAndNotifyObservers();
+            counter ++;
             next = protector.next();
             break;
         }
@@ -584,6 +594,8 @@ void QPropertyObserverPointer::notify(QPropertyBindingPrivate *triggeringBinding
         }
         observer = next;
     }
+    for(int i = 0; i < indent; ++i) std::cout << " ";
+    std::cout << "exiting QPropertyObserverPointer::notify, notified " << counter << " observers" << std::endl;
 }
 
 void QPropertyObserverPointer::observeProperty(QPropertyBindingDataPointer property)

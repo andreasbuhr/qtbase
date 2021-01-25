@@ -47,6 +47,8 @@
 #include <type_traits>
 #include <variant>
 
+#include <iostream>
+
 #include <QtCore/qpropertyprivate.h>
 
 #if __has_include(<source_location>) && __cplusplus >= 202002L && !defined(Q_CLANG_QDOC)
@@ -60,6 +62,22 @@
 #else
 #define QT_PROPERTY_DEFAULT_BINDING_LOCATION QPropertyBindingSourceLocation()
 #endif
+
+extern int indent;
+struct scoped_print {
+    scoped_print(std::string s) : s(s) {
+        for(int i = 0; i < indent; ++i) std::cout << " ";
+        std::cout << "begin: " << s << std::endl;
+        indent += 2;
+    }
+    ~scoped_print() {
+        indent -= 2;
+        for(int i = 0; i < indent; ++i) std::cout << " ";
+        std::cout << "end: " << s << std::endl;
+
+    }
+    std::string s;
+};
 
 QT_BEGIN_NAMESPACE
 
@@ -433,14 +451,14 @@ public:
     }
 
     template<typename Functor>
-    QPropertyChangeHandler<Functor> onValueChanged(Functor f)
+    [[nodiscard]] QPropertyChangeHandler<Functor> onValueChanged(Functor f)
     {
         static_assert(std::is_invocable_v<Functor>, "Functor callback must be callable without any parameters");
         return QPropertyChangeHandler<Functor>(*this, f);
     }
 
     template<typename Functor>
-    QPropertyChangeHandler<Functor> subscribe(Functor f)
+    [[nodiscard]] QPropertyChangeHandler<Functor> subscribe(Functor f)
     {
         static_assert(std::is_invocable_v<Functor>, "Functor callback must be callable without any parameters");
         f();
@@ -997,6 +1015,9 @@ public:
     }
 
     void markDirty() {
+        std::string s("markDirty called in ");
+        s += owner()->extraData->objectName.toStdString();
+        scoped_print s2(s);
         QBindingStorage *storage = qGetBindingStorage(owner());
         auto bd = storage->bindingData(this, /*create=*/false);
         if (bd) { // if we have no BindingData, nobody can listen anyway
